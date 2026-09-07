@@ -1,7 +1,8 @@
 {
   "name": "nhiemvutiktokfree",
-  "version": "2.0.0",
+  "version": "6.0.0",
   "private": true,
+  "description": "NhiemVuTikTokFree - task and points platform",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,8 +11,8 @@
     "node": ">=18"
   },
   "dependencies": {
-    "bcryptjs": "^2.4.3",
-    "express": "^4.21.2",
-    "pg": "^8.13.1"
+    "bcryptjs": "2.4.3",
+    "express": "4.21.2",
+    "pg": "8.13.1"
   }
 }
