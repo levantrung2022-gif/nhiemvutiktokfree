@@ -1,1 +1,1674 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 
+<title>nhiemvutiktokfree</title>
+
+<style>
+*{
+  box-sizing:border-box;
+}
+
+body{
+  margin:0;
+  font-family:Inter,Arial,sans-serif;
+  background:#f5f7fb;
+  color:#172033;
+}
+
+button,
+input{
+  font:inherit;
+}
+
+button{
+  cursor:pointer;
+  border:0;
+}
+
+.top{
+  background:#111827;
+  color:white;
+  position:sticky;
+  top:0;
+  z-index:10;
+}
+
+.nav{
+  max-width:1100px;
+  margin:auto;
+  padding:15px 18px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+}
+
+.brand{
+  font-size:21px;
+  font-weight:800;
+}
+
+.nav small{
+  opacity:.7;
+}
+
+.wrap{
+  max-width:1100px;
+  margin:auto;
+  padding:22px 18px 60px;
+}
+
+.hero{
+  background:linear-gradient(
+    135deg,
+    #111827,
+    #312e81
+  );
+  color:white;
+  border-radius:24px;
+  padding:30px;
+  margin-bottom:18px;
+}
+
+.hero h1{
+  margin:0 0 8px;
+  font-size:34px;
+}
+
+.hero p{
+  margin:0;
+  opacity:.82;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:12px;
+  margin:18px 0;
+}
+
+.stat,
+.card{
+  background:white;
+  border:1px solid #e7eaf0;
+  border-radius:18px;
+  padding:18px;
+  box-shadow:0 8px 24px #1720330b;
+}
+
+.stat b{
+  display:block;
+  font-size:27px;
+  margin-top:6px;
+}
+
+.muted{
+  color:#697386;
+  font-size:13px;
+}
+
+.section{
+  margin-top:20px;
+}
+
+.section h2{
+  margin:0 0 12px;
+  font-size:21px;
+}
+
+.two{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:14px;
+}
+
+.task{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+}
+
+.task h3{
+  margin:0 0 5px;
+}
+
+.pill{
+  display:inline-block;
+  padding:5px 9px;
+  border-radius:99px;
+  background:#eef2ff;
+  color:#4338ca;
+  font-size:12px;
+  font-weight:700;
+}
+
+.btn{
+  padding:11px 15px;
+  border-radius:11px;
+  font-weight:700;
+  background:#111827;
+  color:white;
+}
+
+.btn.alt{
+  background:#eef2ff;
+  color:#3730a3;
+}
+
+.btn.green{
+  background:#059669;
+  color:white;
+}
+
+.btn.red{
+  background:#dc2626;
+  color:white;
+}
+
+.btn:disabled{
+  opacity:.5;
+  cursor:not-allowed;
+}
+
+.row{
+  display:flex;
+  gap:9px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+.input{
+  width:100%;
+  padding:11px 12px;
+  border:1px solid #d8dde7;
+  border-radius:10px;
+  outline:none;
+}
+
+.input:focus{
+  border-color:#6366f1;
+}
+
+.form{
+  display:grid;
+  gap:10px;
+}
+
+.notice{
+  padding:12px;
+  border-radius:12px;
+  background:#f8fafc;
+  margin-top:10px;
+}
+
+.days{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:7px;
+  margin-top:15px;
+}
+
+.day{
+  padding:12px 5px;
+  text-align:center;
+  border-radius:12px;
+  background:#f1f5f9;
+  font-size:12px;
+}
+
+.day.on{
+  background:#dcfce7;
+  color:#166534;
+}
+
+.leader{
+  width:100%;
+  border-collapse:collapse;
+}
+
+.leader td{
+  padding:10px;
+  border-bottom:1px solid #edf0f4;
+}
+
+.rank{
+  font-weight:800;
+  width:45px;
+}
+
+.reward{
+  font-size:12px;
+  color:#059669;
+  font-weight:700;
+}
+
+.modal{
+  position:fixed;
+  inset:0;
+  background:#0008;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:15px;
+  z-index:20;
+}
+
+.modal.show{
+  display:flex;
+}
+
+.modalbox{
+  width:min(430px,100%);
+  background:white;
+  border-radius:20px;
+  padding:22px;
+}
+
+.tabs{
+  display:flex;
+  gap:7px;
+  margin-bottom:15px;
+}
+
+.tab{
+  flex:1;
+  padding:10px;
+  border-radius:10px;
+  background:#f1f5f9;
+}
+
+.tab.active{
+  background:#111827;
+  color:white;
+}
+
+.hide{
+  display:none!important;
+}
+
+.reward-list{
+  display:grid;
+  gap:9px;
+}
+
+.reward-item{
+  border:1px solid #e5e7eb;
+  padding:13px;
+  border-radius:13px;
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:center;
+}
+
+.admin-item{
+  padding:10px;
+  border-bottom:1px solid #eee;
+}
+
+.footer{
+  text-align:center;
+  color:#7b8494;
+  font-size:12px;
+  margin-top:35px;
+}
+
+@media(max-width:800px){
+
+  .grid{
+    grid-template-columns:repeat(2,1fr);
+  }
+
+  .two{
+    grid-template-columns:1fr;
+  }
+
+  .hero h1{
+    font-size:27px;
+  }
+}
+
+@media(max-width:480px){
+
+  .grid{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .task{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+
+  .task .btn{
+    width:100%;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<header class="top">
+
+<div class="nav">
+
+<div>
+  <div class="brand">
+    nhiemvutiktokfree
+  </div>
+
+  <small>
+    Làm nhiệm vụ · tích điểm
+  </small>
+</div>
+
+<div id="navUser">
+  <button
+    class="btn"
+    onclick="openAuth()">
+    Đăng nhập
+  </button>
+</div>
+
+</div>
+
+</header>
+
+<main class="wrap">
+
+<section class="hero">
+
+<h1>
+Làm nhiệm vụ TikTok — tích điểm mỗi ngày
+</h1>
+
+<p>
+Thực hiện nhiệm vụ thủ công trên TikTok,
+sau đó xác nhận trên website để nhận điểm.
+</p>
+
+</section>
+
+<div
+  id="guest"
+  class="card">
+
+<b>
+Chưa đăng nhập
+</b>
+
+<p class="muted">
+Đăng nhập hoặc đăng ký để làm nhiệm vụ,
+điểm danh, đổi điểm và giới thiệu bạn bè.
+</p>
+
+<button
+  class="btn"
+  onclick="openAuth()">
+
+Đăng nhập / Đăng ký
+
+</button>
+
+</div>
+
+<div
+  id="app"
+  class="hide">
+
+<section class="grid">
+
+<div class="stat">
+Điểm hiện có
+<b id="points">0</b>
+</div>
+
+<div class="stat">
+Đã hoàn thành
+<b id="completed">0</b>
+</div>
+
+<div class="stat">
+Điểm danh
+<b id="checkins">0</b>
+</div>
+
+<div class="stat">
+Chuỗi ngày
+<b id="streak">0</b>
+</div>
+
+</section>
+
+<section class="section">
+
+<div class="two">
+
+<div class="card">
+
+<h2>
+🎁 Điểm danh hôm nay
+</h2>
+
+<p class="muted">
+Mỗi ngày nhận +10 điểm.
+</p>
+
+<button
+id="checkBtn"
+class="btn green"
+onclick="checkin()">
+
+Điểm danh +10
+
+</button>
+
+<div class="days">
+
+<div class="day">T2</div>
+<div class="day">T3</div>
+<div class="day">T4</div>
+<div class="day">T5</div>
+<div class="day">T6</div>
+<div class="day">T7</div>
+<div class="day">CN</div>
+
+</div>
+
+</div>
+
+<div class="card">
+
+<h2>
+📣 Kênh chính
+</h2>
+
+<p class="muted">
+Nhiệm vụ có thể bao gồm kênh chính
+và các kênh thành viên.
+</p>
+
+<b>
+@uyn.uyn2229
+</b>
+
+<br><br>
+
+<button
+class="btn alt"
+onclick="window.open(
+'https://www.tiktok.com/@uyn.uyn2229',
+'_blank'
+)">
+
+Mở TikTok
+
+</button>
+
+</div>
+
+</div>
+
+</section>
+
+<section class="section">
+
+<div class="card">
+
+<div
+class="row"
+style="justify-content:space-between">
+
+<div>
+
+<h2>
+🎯 Nhiệm vụ
+</h2>
+
+<p class="muted">
+Mở TikTok, tự thực hiện nhiệm vụ
+rồi bấm xác nhận.
+</p>
+
+</div>
+
+<button
+class="btn alt"
+onclick="newTask()">
+
+Nhiệm vụ khác
+
+</button>
+
+</div>
+
+<div
+id="taskBox"
+class="notice">
+
+Đang tải nhiệm vụ...
+
+</div>
+
+</div>
+
+</section>
+
+<section class="section">
+
+<div class="two">
+
+<div class="card">
+
+<h2>
+👥 Giới thiệu bạn bè
+</h2>
+
+<p class="muted">
+
+Bạn nhận
+<b>20 điểm</b>,
+người đăng ký qua mã nhận
+<b>10 điểm</b>.
+
+</p>
+
+<div class="row">
+
+<input
+id="refCode"
+class="input"
+readonly>
+
+<button
+class="btn alt"
+onclick="copyRef()">
+
+Sao chép
+
+</button>
+
+</div>
+
+<p
+id="refCount"
+class="muted">
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>
+🎁 Đổi điểm
+</h2>
+
+<p class="muted">
+Chọn phần thưởng phù hợp với số điểm của bạn.
+</p>
+
+<div
+id="rewards"
+class="reward-list">
+
+Đang tải...
+
+</div>
+
+</div>
+
+</div>
+
+</section>
+
+<section class="section">
+
+<div class="two">
+
+<div class="card">
+
+<h2>
+🏆 Bảng xếp hạng ngày
+</h2>
+
+<div id="dayBoard"></div>
+
+<p class="reward">
+Top 1: 50 · Top 2: 30 · Top 3: 20 điểm
+</p>
+
+</div>
+
+<div class="card">
+
+<h2>
+🏆 Bảng xếp hạng tuần
+</h2>
+
+<div id="weekBoard"></div>
+
+<p class="reward">
+Top 1: 150 · Top 2: 100 · Top 3: 50 điểm
+</p>
+
+</div>
+
+</div>
+
+</section>
+
+<section class="section">
+
+<div class="card">
+
+<h2>
+👤 Tài khoản
+</h2>
+
+<div id="account"></div>
+
+<br>
+
+<button
+class="btn red"
+onclick="logout()">
+
+Đăng xuất
+
+</button>
+
+</div>
+
+</section>
+
+<section
+id="admin"
+class="section hide">
+
+<div class="card">
+
+<h2>
+⚙️ Quản trị
+</h2>
+
+<div class="two">
+
+<div>
+
+<h3>
+Thêm nhiệm vụ
+</h3>
+
+<div class="form">
+
+<input
+id="atitle"
+class="input"
+placeholder="Tên nhiệm vụ">
+
+<input
+id="auser"
+class="input"
+placeholder="@username">
+
+<input
+id="aurl"
+class="input"
+placeholder="https://www.tiktok.com/@...">
+
+<input
+id="apoints"
+class="input"
+type="number"
+value="5"
+min="1">
+
+<button
+class="btn"
+onclick="addTask()">
+
+Thêm nhiệm vụ
+
+</button>
+
+</div>
+
+<div
+id="adminTasks"
+class="notice">
+</div>
+
+</div>
+
+<div>
+
+<h3>
+Yêu cầu đổi điểm
+</h3>
+
+<div
+id="adminRedemptions"
+class="notice">
+
+Đang tải...
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+
+</section>
+
+</div>
+
+<div class="footer">
+
+Làm nhiệm vụ tự nguyện,
+không tự động hóa TikTok.
+
+</div>
+
+</main>
+
+<div
+id="modal"
+class="modal">
+
+<div class="modalbox">
+
+<div class="tabs">
+
+<button
+id="loginTab"
+class="tab active"
+onclick="showLogin()">
+
+Đăng nhập
+
+</button>
+
+<button
+id="regTab"
+class="tab"
+onclick="showReg()">
+
+Đăng ký
+
+</button>
+
+</div>
+
+<div
+id="loginForm"
+class="form">
+
+<input
+id="lemail"
+class="input"
+type="email"
+placeholder="Email">
+
+<input
+id="lpass"
+class="input"
+type="password"
+placeholder="Mật khẩu">
+
+<button
+class="btn"
+onclick="login()">
+
+Đăng nhập
+
+</button>
+
+</div>
+
+<div
+id="regForm"
+class="form hide">
+
+<input
+id="remail"
+class="input"
+type="email"
+placeholder="Email">
+
+<input
+id="ruser"
+class="input"
+placeholder="Tên người dùng">
+
+<input
+id="rpass"
+class="input"
+type="password"
+placeholder="Mật khẩu (6+ ký tự)">
+
+<input
+id="rcode"
+class="input"
+placeholder="Mã giới thiệu (nếu có)">
+
+<button
+class="btn"
+onclick="register()">
+
+Tạo tài khoản
+
+</button>
+
+</div>
+
+<p
+id="authMsg"
+class="muted">
+</p>
+
+<button
+class="btn alt"
+onclick="closeAuth()">
+
+Đóng
+
+</button>
+
+</div>
+
+</div>
+
+<script>
+
+const $ = id =>
+  document.getElementById(id);
+
+let task = null;
+
+async function api(url, options = {}) {
+
+  const opts = {
+    ...options,
+    credentials: 'same-origin',
+
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  };
+
+  const response =
+    await fetch(url, opts);
+
+  let data = {};
+
+  try {
+    data = await response.json();
+  } catch {}
+
+  if (!response.ok) {
+    throw new Error(
+      data.error || 'Có lỗi xảy ra'
+    );
+  }
+
+  return data;
+}
+
+function openAuth() {
+  $('modal').classList.add('show');
+}
+
+function closeAuth() {
+  $('modal').classList.remove('show');
+}
+
+function showLogin() {
+
+  $('loginForm')
+    .classList.remove('hide');
+
+  $('regForm')
+    .classList.add('hide');
+
+  $('loginTab')
+    .classList.add('active');
+
+  $('regTab')
+    .classList.remove('active');
+
+  $('authMsg').textContent = '';
+}
+
+function showReg() {
+
+  $('loginForm')
+    .classList.add('hide');
+
+  $('regForm')
+    .classList.remove('hide');
+
+  $('loginTab')
+    .classList.remove('active');
+
+  $('regTab')
+    .classList.add('active');
+
+  $('authMsg').textContent = '';
+}
+
+async function login() {
+
+  try {
+
+    const data =
+      await api('/api/login', {
+        method:'POST',
+
+        body:JSON.stringify({
+          email:$('lemail').value,
+          password:$('lpass').value
+        })
+      });
+
+    localStorage.setItem(
+      'nhiemvutiktok_token',
+      data.token
+    );
+
+    closeAuth();
+
+    await load();
+
+  } catch (error) {
+
+    $('authMsg').textContent =
+      error.message;
+  }
+}
+
+async function register() {
+
+  try {
+
+    const data =
+      await api('/api/register', {
+        method:'POST',
+
+        body:JSON.stringify({
+          email:$('remail').value,
+          username:$('ruser').value,
+          password:$('rpass').value,
+          referralCode:$('rcode').value
+        })
+      });
+
+    localStorage.setItem(
+      'nhiemvutiktok_token',
+      data.token
+    );
+
+    closeAuth();
+
+    await load();
+
+  } catch (error) {
+
+    $('authMsg').textContent =
+      error.message;
+  }
+}
+
+async function logout() {
+
+  try {
+
+    await api('/api/logout', {
+      method:'POST'
+    });
+
+  } catch {}
+
+  localStorage.removeItem(
+    'nhiemvutiktok_token'
+  );
+
+  location.reload();
+}
+
+async function load() {
+
+  try {
+
+    const data =
+      await api('/api/me');
+
+    $('guest')
+      .classList.add('hide');
+
+    $('app')
+      .classList.remove('hide');
+
+    renderUser(data.user);
+
+    await Promise.all([
+      newTask(),
+      loadCheckin(),
+      loadReferral(),
+      loadRewards(),
+      loadBoards()
+    ]);
+
+    if (data.user.isAdmin) {
+
+      $('admin')
+        .classList.remove('hide');
+
+      await loadAdmin();
+
+    } else {
+
+      $('admin')
+        .classList.add('hide');
+    }
+
+  } catch (error) {
+
+    localStorage.removeItem(
+      'nhiemvutiktok_token'
+    );
+
+    $('guest')
+      .classList.remove('hide');
+
+    $('app')
+      .classList.add('hide');
+  }
+}
+
+function renderUser(user) {
+
+  $('points').textContent =
+    user.points;
+
+  $('completed').textContent =
+    user.totalCompleted;
+
+  $('checkins').textContent =
+    user.totalCheckins;
+
+  $('streak').textContent =
+    user.streak;
+
+  $('navUser').innerHTML =
+    `<span>${esc(user.username)}</span>`;
+
+  $('account').innerHTML = `
+    <b>${esc(user.username)}</b>
+
+    <div class="muted">
+      ${esc(user.email)}
+    </div>
+
+    <div class="muted">
+      Mã giới thiệu:
+      <b>${esc(user.referralCode)}</b>
+    </div>
+  `;
+}
+
+async function refreshMe() {
+
+  const data =
+    await api('/api/me');
+
+  renderUser(data.user);
+}
+
+async function loadCheckin() {
+
+  const data =
+    await api('/api/checkin/status');
+
+  $('checkBtn').disabled =
+    data.checkedIn;
+
+  $('checkBtn').textContent =
+    data.checkedIn
+      ? '✓ Đã điểm danh'
+      : 'Điểm danh +10';
+}
+
+async function checkin() {
+
+  try {
+
+    const data =
+      await api('/api/checkin', {
+        method:'POST'
+      });
+
+    alert(data.message);
+
+    await refreshMe();
+    await loadCheckin();
+    await loadBoards();
+
+  } catch (error) {
+
+    alert(error.message);
+  }
+}
+
+async function newTask() {
+
+  try {
+
+    const data =
+      await api('/api/tasks/random');
+
+    task = data.task;
+
+    if (!task) {
+
+      $('taskBox').innerHTML =
+        '<b>🎉 Hết nhiệm vụ chưa hoàn thành.</b>';
+
+      return;
+    }
+
+    $('taskBox').innerHTML = `
+
+      <div class="task">
+
+        <div>
+
+          <span class="pill">
+            +${task.points} điểm
+          </span>
+
+          <h3>
+            ${esc(task.title)}
+          </h3>
+
+          <div class="muted">
+            ${esc(task.username)}
+          </div>
+
+        </div>
+
+        <div class="row">
+
+          <button
+            class="btn alt"
+            onclick="window.open(
+              '${safeUrl(task.url)}',
+              '_blank'
+            )">
+
+            Mở TikTok
+
+          </button>
+
+          <button
+            class="btn green"
+            onclick="completeTask()">
+
+            Tôi đã làm
+
+          </button>
+
+        </div>
+
+      </div>
+    `;
+
+  } catch (error) {
+
+    $('taskBox').textContent =
+      error.message;
+  }
+}
+
+async function completeTask() {
+
+  if (!task) return;
+
+  try {
+
+    const data =
+      await api(
+        '/api/tasks/' +
+        task.id +
+        '/complete',
+        {
+          method:'POST'
+        }
+      );
+
+    alert(data.message);
+
+    await refreshMe();
+    await newTask();
+    await loadBoards();
+
+  } catch (error) {
+
+    alert(error.message);
+  }
+}
+
+async function loadReferral() {
+
+  const data =
+    await api('/api/referral');
+
+  $('refCode').value =
+    data.code;
+
+  $('refCount').textContent =
+    `Đã giới thiệu: ${data.count} người`;
+}
+
+async function copyRef() {
+
+  try {
+
+    await navigator.clipboard.writeText(
+      $('refCode').value
+    );
+
+    alert(
+      'Đã sao chép mã giới thiệu.'
+    );
+
+  } catch {
+
+    alert(
+      'Không thể sao chép tự động.'
+    );
+  }
+}
+
+async function loadRewards() {
+
+  const data =
+    await api('/api/rewards');
+
+  $('rewards').innerHTML =
+    data.rewards.map(reward => `
+
+      <div class="reward-item">
+
+        <div>
+
+          <b>
+            ${esc(reward.name)}
+          </b>
+
+          <div class="muted">
+            ${esc(
+              reward.description || ''
+            )}
+          </div>
+
+        </div>
+
+        <button
+          class="btn alt"
+          onclick="redeem(${reward.id})">
+
+          ${reward.cost} điểm
+
+        </button>
+
+      </div>
+
+    `).join('') ||
+
+    '<div class="muted">Chưa có phần thưởng.</div>';
+}
+
+async function redeem(id) {
+
+  if (
+    !confirm(
+      'Đổi điểm cho phần thưởng này?'
+    )
+  ) {
+    return;
+  }
+
+  try {
+
+    const data =
+      await api(
+        '/api/rewards/' +
+        id +
+        '/redeem',
+        {
+          method:'POST'
+        }
+      );
+
+    alert(data.message);
+
+    await refreshMe();
+
+  } catch (error) {
+
+    alert(error.message);
+  }
+}
+
+async function loadBoards() {
+
+  for (
+    const period of ['day','week']
+  ) {
+
+    try {
+
+      const data =
+        await api(
+          '/api/leaderboard/' +
+          period
+        );
+
+      const element =
+        period === 'day'
+          ? $('dayBoard')
+          : $('weekBoard');
+
+      element.innerHTML = `
+
+        <table class="leader">
+
+          ${data.items.map(
+            (item,index) => `
+
+            <tr>
+
+              <td class="rank">
+                ${index + 1}
+              </td>
+
+              <td>
+                ${esc(item.username)}
+              </td>
+
+              <td>
+                <b>
+                  ${item.score}
+                </b>
+              </td>
+
+            </tr>
+          `
+          ).join('')}
+
+        </table>
+      `;
+
+    } catch (error) {
+
+      const element =
+        period === 'day'
+          ? $('dayBoard')
+          : $('weekBoard');
+
+      element.textContent =
+        error.message;
+    }
+  }
+}
+
+async function loadAdmin() {
+
+  try {
+
+    const taskData =
+      await api('/api/admin/tasks');
+
+    $('adminTasks').innerHTML =
+      taskData.tasks.map(
+        item => `
+
+        <div class="admin-item">
+
+          <b>
+            ${esc(item.title)}
+          </b>
+
+          · +${item.points}
+
+          <br>
+
+          <small>
+            ${esc(item.username)}
+          </small>
+
+          <button
+            class="btn red"
+            style="padding:5px 8px"
+            onclick="deleteTask(${item.id})">
+
+            Xóa
+
+          </button>
+
+        </div>
+      `
+      ).join('');
+
+    const redemptionData =
+      await api(
+        '/api/admin/redemptions'
+      );
+
+    $('adminRedemptions').innerHTML =
+      redemptionData.items.map(
+        item => `
+
+        <div class="admin-item">
+
+          <b>
+            ${esc(item.name)}
+          </b>
+
+          · ${item.cost} điểm
+
+          <br>
+
+          ${esc(item.username)}
+
+          · ${esc(item.email)}
+
+          <br>
+
+          <small>
+            Trạng thái: ${esc(item.status)}
+          </small>
+
+          <br>
+
+          <button
+            class="btn alt"
+            style="padding:5px 8px"
+            onclick="setRedemption(
+              ${item.id},
+              'approved'
+            )">
+
+            Duyệt
+
+          </button>
+
+          <button
+            class="btn green"
+            style="padding:5px 8px"
+            onclick="setRedemption(
+              ${item.id},
+              'done'
+            )">
+
+            Hoàn tất
+
+          </button>
+
+          <button
+            class="btn red"
+            style="padding:5px 8px"
+            onclick="setRedemption(
+              ${item.id},
+              'rejected'
+            )">
+
+            Từ chối
+
+          </button>
+
+        </div>
+      `
+      ).join('') ||
+
+      'Chưa có yêu cầu đổi điểm.';
+
+  } catch (error) {
+
+    console.log(error);
+  }
+}
+
+async function addTask() {
+
+  try {
+
+    await api(
+      '/api/admin/tasks',
+      {
+        method:'POST',
+
+        body:JSON.stringify({
+
+          title:
+            $('atitle').value,
+
+          username:
+            $('auser').value,
+
+          url:
+            $('aurl').value,
+
+          points:
+            $('apoints').value
+
+        })
+      }
+    );
+
+    $('atitle').value = '';
+    $('auser').value = '';
+    $('aurl').value = '';
+
+    await loadAdmin();
+
+    alert(
+      'Đã thêm nhiệm vụ.'
+    );
+
+  } catch (error) {
+
+    alert(error.message);
+  }
+}
+
+async function deleteTask(id) {
+
+  if (!confirm('Xóa nhiệm vụ?')) {
+    return;
+  }
+
+  try {
+
+    await api(
+      '/api/admin/tasks/' + id,
+      {
+        method:'DELETE'
+      }
+    );
+
+    await loadAdmin();
+
+  } catch (error) {
+
+    alert(error.message);
+  }
+}
+
+async function setRedemption(
+  id,
+  status
+) {
+
+  try {
+
+    await api(
+      '/api/admin/redemptions/' + id,
+      {
+        method:'PATCH',
+
+        body:JSON.stringify({
+          status
+        })
+      }
+    );
+
+    await loadAdmin();
+
+    alert(
+      'Đã cập nhật trạng thái.'
+    );
+
+  } catch (error) {
+
+    alert(error.message);
+  }
+}
+
+function esc(value) {
+
+  return String(value ?? '')
+    .replace(
+      /[&<>'"]/g,
+      char => ({
+        '&':'&amp;',
+        '<':'&lt;',
+        '>':'&gt;',
+        "'":'&#39;',
+        '"':'&quot;'
+      }[char])
+    );
+}
+
+function safeUrl(value) {
+
+  const url =
+    String(value || '');
+
+  return /^https?:\/\//i.test(url)
+    ? url
+    : '#';
+}
+
+load();
+
+</script>
+
+</body>
+</html>
