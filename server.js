@@ -5,1633 +5,1567 @@ const bcrypt = require("bcryptjs");
 const { Pool } = require("pg");
 
 const app = express();
-
 const PORT = process.env.PORT || 10000;
-const DATABASE_URL = process.env.DATABASE_URL;
+
+const DATABASE_URL = String(process.env.DATABASE_URL || "").trim();
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "");
 
 if (!DATABASE_URL) {
-  console.error("ERROR: DATABASE_URL is missing.");
+  console.error("STARTUP ERROR: DATABASE_URL is missing.");
   process.exit(1);
 }
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: DATABASE_URL.includes("localhost")
-    ? false
-    : { rejectUnauthorized: false },
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const PUBLIC_DIR = path.join(__dirname, "public");
-const INDEX_FILE = path.join(PUBLIC_DIR, "index.html");
+const publicDir = path.join(__dirname, "public");
 
-app.use(express.static(PUBLIC_DIR));
+app.use(express.static(publicDir));
 
-/* =========================================================
-   HELPERS
-========================================================= */
+const sessions = new Map();
 
-function normalizeEmail(value) {
-  return String(value || "").trim().toLowerCase();
+function createToken() {
+  return crypto.randomBytes(32).toString("hex");
 }
 
-function cleanUsername(value) {
-  return String(value || "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .slice(0, 40);
+function createReferralCode() {
+  return crypto.randomBytes(5).toString("hex").toUpperCase();
 }
 
-function randomToken(bytes = 32) {
-  return crypto.randomBytes(bytes).toString("hex");
-}
-
-function hashToken(token) {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
-
-function getCookie(req, name) {
-  const header = req.headers.cookie || "";
-
-  const parts = header.split(";");
-
-  for (const part of parts) {
-    const [key, ...rest] = part.trim().split("=");
-
-    if (key === name) {
-      return decodeURIComponent(rest.join("="));
-    }
-  }
-
-  return null;
-}
-
-function setSessionCookie(res, token) {
-  const maxAge = 30 * 24 * 60 * 60;
-
-  res.setHeader(
-    "Set-Cookie",
-    `nv_session=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax`
-  );
-}
-
-function clearSessionCookie(res) {
-  res.setHeader(
-    "Set-Cookie",
-    "nv_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax"
-  );
-}
-
-function ok(res, data = {}) {
-  return res.json({
-    success: true,
-    ...data
-  });
-}
-
-function fail(res, status, message) {
-  return res.status(status).json({
-    success: false,
-    message
-  });
-}
-
-async function createSession(userId) {
-  const rawToken = randomToken(32);
-  const tokenHash = hashToken(rawToken);
-
-  await pool.query(
-    `
-      INSERT INTO nv_sessions
-      (token_hash, user_id, expires_at)
-      VALUES ($1, $2, NOW() + INTERVAL '30 days')
-    `,
-    [tokenHash, userId]
-  );
-
-  return rawToken;
-}
-
-async function getCurrentUser(req) {
-  const rawToken = getCookie(req, "nv_session");
-
-  if (!rawToken) {
-    return null;
-  }
-
-  const tokenHash = hashToken(rawToken);
-
-  const result = await pool.query(
-    `
-      SELECT
-        u.id,
-        u.email,
-        u.username,
-        u.role,
-        u.points,
-        u.total_completed,
-        u.total_checkins,
-        u.streak,
-        u.last_checkin,
-        u.referral_code,
-        u.created_at
-      FROM nv_sessions s
-      JOIN nv_users u ON u.id = s.user_id
-      WHERE s.token_hash = $1
-        AND s.expires_at > NOW()
-      LIMIT 1
-    `,
-    [tokenHash]
-  );
-
-  return result.rows[0] || null;
-}
-
-async function auth(req, res, next) {
-  try {
-    const user = await getCurrentUser(req);
-
-    if (!user) {
-      return fail(res, 401, "Vui lòng đăng nhập.");
-    }
-
-    req.user = user;
-    next();
-  } catch (error) {
-    console.error("AUTH ERROR:", error);
-    return fail(res, 500, "Lỗi xác thực.");
-  }
-}
-
-function adminOnly(req, res, next) {
-  if (!req.user || req.user.role !== "admin") {
-    return fail(res, 403, "Bạn không có quyền quản trị.");
-  }
-
-  next();
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
 }
 
 function validEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-/* =========================================================
-   DATABASE
-========================================================= */
+function validTikTokUrl(value) {
+  try {
+    const url = new URL(String(value || "").trim());
+
+    return (
+      url.protocol === "https:" &&
+      (
+        url.hostname === "tiktok.com" ||
+        url.hostname.endsWith(".tiktok.com")
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+function auth(req, res, next) {
+  const header = String(req.headers.authorization || "");
+
+  if (!header.startsWith("Bearer ")) {
+    return res.status(401).json({
+      error: "Chưa đăng nhập."
+    });
+  }
+
+  const token = header.slice(7).trim();
+  const session = sessions.get(token);
+
+  if (!session) {
+    return res.status(401).json({
+      error: "Phiên đăng nhập không hợp lệ."
+    });
+  }
+
+  if (session.expiresAt < Date.now()) {
+    sessions.delete(token);
+
+    return res.status(401).json({
+      error: "Phiên đăng nhập đã hết hạn."
+    });
+  }
+
+  req.user = session.user;
+  req.token = token;
+
+  next();
+}
+
+function adminOnly(req, res, next) {
+  if (!req.user || !req.user.is_admin) {
+    return res.status(403).json({
+      error: "Bạn không có quyền quản trị."
+    });
+  }
+
+  next();
+}
+
+async function transaction(callback) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const result = await callback(client);
+
+    await client.query("COMMIT");
+
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function addPoints(client, userId, amount, reason) {
+  await client.query(
+    `
+    UPDATE users
+    SET points = points + $1
+    WHERE id = $2
+    `,
+    [amount, userId]
+  );
+
+  await client.query(
+    `
+    INSERT INTO point_transactions
+    (user_id, amount, reason)
+    VALUES ($1, $2, $3)
+    `,
+    [userId, amount, reason]
+  );
+}
+
+async function removePoints(client, userId, amount, reason) {
+  const result = await client.query(
+    `
+    UPDATE users
+    SET points = points - $1
+    WHERE id = $2
+      AND points >= $1
+    RETURNING id
+    `,
+    [amount, userId]
+  );
+
+  if (!result.rowCount) {
+    throw new Error("Không đủ điểm.");
+  }
+
+  await client.query(
+    `
+    INSERT INTO point_transactions
+    (user_id, amount, reason)
+    VALUES ($1, $2, $3)
+    `,
+    [userId, -amount, reason]
+  );
+}
+
+function publicUser(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    points: user.points,
+    referral_code: user.referral_code,
+    is_admin: user.is_admin,
+    is_blocked: user.is_blocked
+  };
+}
+
+async function createSession(user) {
+  const token = createToken();
+
+  sessions.set(token, {
+    user: publicUser(user),
+    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000
+  });
+
+  return token;
+}
 
 async function initDatabase() {
-  console.log("Initializing PostgreSQL...");
+  console.log("Initializing database...");
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS nv_users (
+    CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      username TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'user',
       points INTEGER NOT NULL DEFAULT 0,
-      total_completed INTEGER NOT NULL DEFAULT 0,
-      total_checkins INTEGER NOT NULL DEFAULT 0,
-      streak INTEGER NOT NULL DEFAULT 0,
-      last_checkin DATE,
-      referral_code TEXT UNIQUE,
-      referred_by INTEGER REFERENCES nv_users(id),
+      referral_code TEXT UNIQUE NOT NULL,
+      referred_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+      is_blocked BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS nv_sessions (
+    CREATE TABLE IF NOT EXISTS tasks (
       id SERIAL PRIMARY KEY,
-      token_hash TEXT NOT NULL UNIQUE,
-      user_id INTEGER NOT NULL REFERENCES nv_users(id) ON DELETE CASCADE,
-      expires_at TIMESTAMPTZ NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS nv_tasks (
-      id SERIAL PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      url TEXT NOT NULL,
-      points INTEGER NOT NULL DEFAULT 5,
+      title TEXT NOT NULL DEFAULT 'Nhiệm vụ TikTok',
+      description TEXT NOT NULL DEFAULT '',
+      task_url TEXT NOT NULL DEFAULT '',
+      points INTEGER NOT NULL DEFAULT 10,
+      is_main BOOLEAN NOT NULL DEFAULT FALSE,
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
 
+  /*
+   * Sửa database cũ nếu bảng tasks đã tồn tại
+   * nhưng thiếu các cột của phiên bản mới.
+   */
+
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS nv_task_completions (
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS title TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS description TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS task_url TEXT;
+  `);
+
+  await pool.query(`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS points INTEGER;
+  `);
+
+  await pool.query(`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS is_main BOOLEAN;
+  `);
+
+  await pool.query(`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS active BOOLEAN;
+  `);
+
+  await pool.query(`
+    ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+  `);
+
+  await pool.query(`
+    UPDATE tasks
+    SET title = 'Nhiệm vụ TikTok'
+    WHERE title IS NULL;
+  `);
+
+  await pool.query(`
+    UPDATE tasks
+    SET description = ''
+    WHERE description IS NULL;
+  `);
+
+  await pool.query(`
+    UPDATE tasks
+    SET task_url = ''
+    WHERE task_url IS NULL;
+  `);
+
+  await pool.query(`
+    UPDATE tasks
+    SET points = 10
+    WHERE points IS NULL;
+  `);
+
+  await pool.query(`
+    UPDATE tasks
+    SET is_main = FALSE
+    WHERE is_main IS NULL;
+  `);
+
+  await pool.query(`
+    UPDATE tasks
+    SET active = TRUE
+    WHERE active IS NULL;
+  `);
+
+  await pool.query(`
+    UPDATE tasks
+    SET created_at = NOW()
+    WHERE created_at IS NULL;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS task_completions (
       id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES nv_users(id) ON DELETE CASCADE,
-      task_id INTEGER NOT NULL REFERENCES nv_tasks(id) ON DELETE CASCADE,
-      points_awarded INTEGER NOT NULL DEFAULT 0,
-      completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(user_id, task_id)
     );
   `);
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS nv_checkins (
+    CREATE TABLE IF NOT EXISTS checkins (
       id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES nv_users(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       checkin_date DATE NOT NULL,
-      points_awarded INTEGER NOT NULL DEFAULT 10,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(user_id, checkin_date)
     );
   `);
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS nv_rewards (
+    CREATE TABLE IF NOT EXISTS point_transactions (
       id SERIAL PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      cost INTEGER NOT NULL,
-      active BOOLEAN NOT NULL DEFAULT TRUE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount INTEGER NOT NULL,
+      reason TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS nv_redemptions (
+    CREATE TABLE IF NOT EXISTS packages (
       id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES nv_users(id) ON DELETE CASCADE,
-      reward_id INTEGER NOT NULL REFERENCES nv_rewards(id),
-      reward_title TEXT NOT NULL,
-      cost INTEGER NOT NULL,
+      name TEXT UNIQUE NOT NULL,
+      points INTEGER NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      active BOOLEAN NOT NULL DEFAULT TRUE
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS promotions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      package_name TEXT NOT NULL,
+      points INTEGER NOT NULL,
+      tiktok_url TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      processed_at TIMESTAMPTZ
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
 
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS nv_sessions_user_idx
-    ON nv_sessions(user_id);
-  `);
+  /*
+   * Nếu database cũ chưa có nhiệm vụ thì tạo nhiệm vụ mặc định.
+   */
 
   await pool.query(`
-    CREATE INDEX IF NOT EXISTS nv_tasks_active_idx
-    ON nv_tasks(active);
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS nv_completions_user_idx
-    ON nv_task_completions(user_id);
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS nv_checkins_user_idx
-    ON nv_checkins(user_id);
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS nv_redemptions_user_idx
-    ON nv_redemptions(user_id);
-  `);
-
-  const taskCount = await pool.query(`
-    SELECT COUNT(*)::int AS count
-    FROM nv_tasks
-  `);
-
-  if (taskCount.rows[0].count === 0) {
-    await pool.query(
-      `
-        INSERT INTO nv_tasks
-        (title, description, url, points)
-        VALUES
-        ($1, $2, $3, $4),
-        ($5, $6, $7, $8),
-        ($9, $10, $11, $12)
-      `,
-      [
-        "Theo dõi kênh TikTok chính",
-        "Mở TikTok và thực hiện nhiệm vụ thủ công.",
-        "https://www.tiktok.com/@uyn.uyn2229",
-        10,
-
-        "Khám phá kênh cộng đồng",
-        "Mở kênh và thực hiện nhiệm vụ nếu bạn muốn.",
-        "https://www.tiktok.com/",
-        5,
-
-        "Xem nội dung đề xuất",
-        "Khám phá nội dung TikTok.",
-        "https://www.tiktok.com/",
-        5
-      ]
+    INSERT INTO tasks
+    (title, description, task_url, points, is_main, active)
+    SELECT
+      'Nhiệm vụ TikTok',
+      'Thực hiện nhiệm vụ theo hướng dẫn.',
+      '',
+      10,
+      FALSE,
+      TRUE
+    WHERE NOT EXISTS (
+      SELECT 1 FROM tasks
     );
-  }
-
-  const rewardCount = await pool.query(`
-    SELECT COUNT(*)::int AS count
-    FROM nv_rewards
   `);
 
-  if (rewardCount.rows[0].count === 0) {
-    await pool.query(
-      `
-        INSERT INTO nv_rewards
-        (title, description, cost)
-        VALUES
-        ($1, $2, $3),
-        ($4, $5, $6),
-        ($7, $8, $9)
-      `,
-      [
-        "Gói 50 điểm",
-        "Đổi điểm theo quy định của hệ thống.",
+  /*
+   * Các gói đổi điểm.
+   */
+
+  await pool.query(`
+    INSERT INTO packages
+    (name, points, description)
+    VALUES
+      (
+        'Đề xuất cơ bản',
+        30,
+        'Gói quảng bá cơ bản'
+      ),
+      (
+        'Đề xuất nhiều tương tác',
         50,
+        'Gói quảng bá tăng cường'
+      ),
+      (
+        'Đề xuất cao',
+        70,
+        'Gói quảng bá cao'
+      )
+    ON CONFLICT (name)
+    DO UPDATE SET
+      points = EXCLUDED.points,
+      description = EXCLUDED.description;
+  `);
 
-        "Gói 100 điểm",
-        "Đổi điểm theo quy định của hệ thống.",
-        100,
+  /*
+   * Tạo tài khoản admin từ Environment Variables.
+   */
 
-        "Gói 250 điểm",
-        "Đổi điểm theo quy định của hệ thống.",
-        250
-      ]
+  if (ADMIN_EMAIL && ADMIN_PASSWORD) {
+    const hash = await bcrypt.hash(ADMIN_PASSWORD, 12);
+
+    const existing = await pool.query(
+      `
+      SELECT id
+      FROM users
+      WHERE email = $1
+      `,
+      [ADMIN_EMAIL]
     );
+
+    if (existing.rowCount) {
+      await pool.query(
+        `
+        UPDATE users
+        SET
+          password_hash = $1,
+          is_admin = TRUE,
+          is_blocked = FALSE
+        WHERE email = $2
+        `,
+        [hash, ADMIN_EMAIL]
+      );
+
+      console.log("Admin account updated.");
+    } else {
+      await pool.query(
+        `
+        INSERT INTO users
+        (
+          email,
+          password_hash,
+          referral_code,
+          is_admin
+        )
+        VALUES
+        ($1, $2, $3, TRUE)
+        `,
+        [
+          ADMIN_EMAIL,
+          hash,
+          createReferralCode()
+        ]
+      );
+
+      console.log("Admin account created.");
+    }
   }
 
-  console.log("PostgreSQL initialized successfully.");
+  console.log("Database initialized successfully.");
 }
 
-/* =========================================================
-   HEALTH
-========================================================= */
+/*
+ * Health check
+ */
 
-app.get("/api/health", async (req, res) => {
+app.get("/health", async (req, res) => {
   try {
     await pool.query("SELECT 1");
 
-    return ok(res, {
-      status: "online",
-      database: "connected"
+    res.json({
+      ok: true,
+      service: "nhiemvutiktokfree"
     });
   } catch (error) {
-    console.error("HEALTH ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      status: "offline",
-      database: "error"
+    res.status(500).json({
+      ok: false
     });
   }
 });
 
-/* =========================================================
-   AUTH - REGISTER
-========================================================= */
+/*
+ * Trang chủ
+ */
+
+app.get("/", (req, res) => {
+  res.sendFile(
+    path.join(publicDir, "index.html")
+  );
+});
+
+/*
+ * Đăng ký
+ */
 
 app.post("/api/register", async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
-    const username = cleanUsername(req.body.username);
-    const referralCode = String(req.body.referralCode || "")
-      .trim()
-      .toUpperCase();
+    const referralCode = String(
+      req.body.referral_code || ""
+    ).trim().toUpperCase();
 
     if (!validEmail(email)) {
-      return fail(res, 400, "Email không hợp lệ.");
+      return res.status(400).json({
+        error: "Email không hợp lệ."
+      });
     }
 
     if (password.length < 6) {
-      return fail(res, 400, "Mật khẩu phải có ít nhất 6 ký tự.");
+      return res.status(400).json({
+        error: "Mật khẩu phải có ít nhất 6 ký tự."
+      });
     }
 
-    if (username.length < 2) {
-      return fail(res, 400, "Tên người dùng phải có ít nhất 2 ký tự.");
-    }
-
-    const existing = await pool.query(
-      `
+    const user = await transaction(async (client) => {
+      const exists = await client.query(
+        `
         SELECT id
-        FROM nv_users
+        FROM users
         WHERE email = $1
-        LIMIT 1
-      `,
-      [email]
-    );
-
-    if (existing.rows.length > 0) {
-      return fail(res, 409, "Email này đã được đăng ký.");
-    }
-
-    let referrer = null;
-
-    if (referralCode) {
-      const refResult = await pool.query(
-        `
-          SELECT id
-          FROM nv_users
-          WHERE referral_code = $1
-          LIMIT 1
         `,
-        [referralCode]
+        [email]
       );
 
-      if (refResult.rows.length === 0) {
-        return fail(res, 400, "Mã giới thiệu không tồn tại.");
+      if (exists.rowCount) {
+        throw new Error("Email đã được đăng ký.");
       }
 
-      referrer = refResult.rows[0];
-    }
+      let referredBy = null;
 
-    const passwordHash = await bcrypt.hash(password, 12);
-
-    let newReferralCode;
-
-    for (let i = 0; i < 10; i++) {
-      const candidate =
-        username
-          .replace(/[^a-zA-Z0-9]/g, "")
-          .slice(0, 6)
-          .toUpperCase() +
-        crypto.randomBytes(3).toString("hex").toUpperCase();
-
-      const check = await pool.query(
-        `
+      if (referralCode) {
+        const referrer = await client.query(
+          `
           SELECT id
-          FROM nv_users
+          FROM users
           WHERE referral_code = $1
-          LIMIT 1
-        `,
-        [candidate]
-      );
+          `,
+          [referralCode]
+        );
 
-      if (check.rows.length === 0) {
-        newReferralCode = candidate;
-        break;
+        if (referrer.rowCount) {
+          referredBy = referrer.rows[0].id;
+        }
       }
-    }
 
-    if (!newReferralCode) {
-      newReferralCode = crypto
-        .randomBytes(6)
-        .toString("hex")
-        .toUpperCase();
-    }
+      let referral = createReferralCode();
 
-    const role =
-      ADMIN_EMAIL && email === ADMIN_EMAIL
-        ? "admin"
-        : "user";
-
-    const client = await pool.connect();
-
-    try {
-      await client.query("BEGIN");
-
-      const userResult = await client.query(
-        `
-          INSERT INTO nv_users
-          (
-            email,
-            username,
-            password_hash,
-            role,
-            points,
-            referral_code,
-            referred_by
+      while (
+        (
+          await client.query(
+            `
+            SELECT 1
+            FROM users
+            WHERE referral_code = $1
+            `,
+            [referral]
           )
-          VALUES
-          ($1, $2, $3, $4, $5, $6, $7)
-          RETURNING
-            id,
-            email,
-            username,
-            role,
-            points,
-            referral_code
+        ).rowCount
+      ) {
+        referral = createReferralCode();
+      }
+
+      const passwordHash = await bcrypt.hash(
+        password,
+        12
+      );
+
+      const inserted = await client.query(
+        `
+        INSERT INTO users
+        (
+          email,
+          password_hash,
+          referral_code,
+          referred_by
+        )
+        VALUES
+        ($1, $2, $3, $4)
+        RETURNING
+          id,
+          email,
+          points,
+          referral_code,
+          is_admin,
+          is_blocked
         `,
         [
           email,
-          username,
           passwordHash,
-          role,
-          referrer ? 10 : 0,
-          newReferralCode,
-          referrer ? referrer.id : null
+          referral,
+          referredBy
         ]
       );
 
-      const user = userResult.rows[0];
+      const newUser = inserted.rows[0];
 
-      if (referrer) {
-        await client.query(
-          `
-            UPDATE nv_users
-            SET points = points + 20
-            WHERE id = $1
-          `,
-          [referrer.id]
+      /*
+       * Người giới thiệu nhận 20 điểm.
+       */
+
+      if (referredBy) {
+        await addPoints(
+          client,
+          referredBy,
+          20,
+          `Giới thiệu người dùng ${email}`
         );
       }
 
-      await client.query("COMMIT");
+      return newUser;
+    });
 
-      const token = await createSession(user.id);
-      setSessionCookie(res, token);
+    const token = await createSession(user);
 
-      return ok(res, {
-        message: "Đăng ký thành công.",
-        user
-      });
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+    res.json({
+      success: true,
+      token,
+      user: publicUser(user)
+    });
+
   } catch (error) {
-    console.error("REGISTER ERROR:", error);
+    console.error(error);
 
-    if (error.code === "23505") {
-      return fail(res, 409, "Email hoặc mã giới thiệu đã tồn tại.");
-    }
-
-    return fail(res, 500, "Đăng ký thất bại. Vui lòng thử lại.");
+    res.status(400).json({
+      error: error.message || "Không thể đăng ký."
+    });
   }
 });
 
-/* =========================================================
-   AUTH - LOGIN
-========================================================= */
+/*
+ * Đăng nhập
+ */
 
 app.post("/api/login", async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
 
-    if (!validEmail(email)) {
-      return fail(res, 400, "Email không hợp lệ.");
-    }
-
-    if (!password) {
-      return fail(res, 400, "Vui lòng nhập mật khẩu.");
-    }
-
     const result = await pool.query(
       `
-        SELECT *
-        FROM nv_users
-        WHERE email = $1
-        LIMIT 1
+      SELECT
+        id,
+        email,
+        password_hash,
+        points,
+        referral_code,
+        is_admin,
+        is_blocked
+      FROM users
+      WHERE email = $1
       `,
       [email]
     );
 
-    if (result.rows.length === 0) {
-      return fail(res, 401, "Email hoặc mật khẩu không đúng.");
+    if (!result.rowCount) {
+      return res.status(401).json({
+        error: "Email hoặc mật khẩu không đúng."
+      });
     }
 
     const user = result.rows[0];
 
-    const validPassword = await bcrypt.compare(
+    if (user.is_blocked) {
+      return res.status(403).json({
+        error: "Tài khoản đã bị khóa."
+      });
+    }
+
+    const passwordOk = await bcrypt.compare(
       password,
       user.password_hash
     );
 
-    if (!validPassword) {
-      return fail(res, 401, "Email hoặc mật khẩu không đúng.");
+    if (!passwordOk) {
+      return res.status(401).json({
+        error: "Email hoặc mật khẩu không đúng."
+      });
     }
 
-    const token = await createSession(user.id);
+    const token = await createSession(user);
 
-    setSessionCookie(res, token);
-
-    delete user.password_hash;
-
-    return ok(res, {
-      message: "Đăng nhập thành công.",
-      user
+    res.json({
+      success: true,
+      token,
+      user: publicUser(user)
     });
-  } catch (error) {
-    console.error("LOGIN ERROR:", error);
 
-    return fail(res, 500, "Đăng nhập thất bại.");
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: "Lỗi đăng nhập."
+    });
   }
 });
 
-/* =========================================================
-   LOGOUT
-========================================================= */
+/*
+ * Đăng xuất
+ */
 
-app.post("/api/logout", async (req, res) => {
-  try {
-    const rawToken = getCookie(req, "nv_session");
+app.post("/api/logout", auth, (req, res) => {
+  sessions.delete(req.token);
 
-    if (rawToken) {
-      await pool.query(
-        `
-          DELETE FROM nv_sessions
-          WHERE token_hash = $1
-        `,
-        [hashToken(rawToken)]
-      );
-    }
-
-    clearSessionCookie(res);
-
-    return ok(res, {
-      message: "Đã đăng xuất."
-    });
-  } catch (error) {
-    console.error("LOGOUT ERROR:", error);
-
-    clearSessionCookie(res);
-
-    return ok(res);
-  }
-});
-
-/* =========================================================
-   ME
-========================================================= */
-
-app.get("/api/me", auth, async (req, res) => {
-  return ok(res, {
-    user: req.user
+  res.json({
+    success: true
   });
 });
 
-/* =========================================================
-   CHECK-IN
-========================================================= */
+/*
+ * Dashboard
+ */
 
-app.post("/api/checkin", auth, async (req, res) => {
+app.get("/api/dashboard", auth, async (req, res) => {
   try {
-    const client = await pool.connect();
+    const userResult = await pool.query(
+      `
+      SELECT
+        id,
+        email,
+        points,
+        referral_code,
+        is_admin,
+        is_blocked
+      FROM users
+      WHERE id = $1
+      `,
+      [req.user.id]
+    );
 
-    try {
-      await client.query("BEGIN");
-
-      const check = await client.query(
-        `
-          SELECT id
-          FROM nv_checkins
-          WHERE user_id = $1
-            AND checkin_date = CURRENT_DATE
-          LIMIT 1
-        `,
-        [req.user.id]
-      );
-
-      if (check.rows.length > 0) {
-        await client.query("ROLLBACK");
-
-        return fail(
-          res,
-          400,
-          "Hôm nay bạn đã điểm danh rồi."
-        );
-      }
-
-      const last = await client.query(
-        `
-          SELECT last_checkin
-          FROM nv_users
-          WHERE id = $1
-          FOR UPDATE
-        `,
-        [req.user.id]
-      );
-
-      let newStreak = 1;
-
-      if (last.rows[0].last_checkin) {
-        const yesterday = await client.query(`
-          SELECT CURRENT_DATE - INTERVAL '1 day' AS date
-        `);
-
-        const yesterdayDate =
-          yesterday.rows[0].date;
-
-        const lastDate =
-          new Date(
-            last.rows[0].last_checkin
-          ).toISOString().slice(0, 10);
-
-        const yDate =
-          new Date(
-            yesterdayDate
-          ).toISOString().slice(0, 10);
-
-        if (lastDate === yDate) {
-          newStreak = Number(req.user.streak || 0) + 1;
-        }
-      }
-
-      await client.query(
-        `
-          INSERT INTO nv_checkins
-          (user_id, checkin_date, points_awarded)
-          VALUES ($1, CURRENT_DATE, 10)
-        `,
-        [req.user.id]
-      );
-
-      await client.query(
-        `
-          UPDATE nv_users
-          SET
-            points = points + 10,
-            total_checkins = total_checkins + 1,
-            streak = $2,
-            last_checkin = CURRENT_DATE
-          WHERE id = $1
-        `,
-        [req.user.id, newStreak]
-      );
-
-      await client.query("COMMIT");
-
-      return ok(res, {
-        message: "Điểm danh thành công +10 điểm.",
-        pointsAdded: 10,
-        streak: newStreak
+    if (!userResult.rowCount) {
+      return res.status(404).json({
+        error: "Không tìm thấy tài khoản."
       });
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
     }
-  } catch (error) {
-    console.error("CHECKIN ERROR:", error);
 
-    return fail(res, 500, "Điểm danh thất bại.");
+    const doneResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS count
+      FROM task_completions
+      WHERE user_id = $1
+      `,
+      [req.user.id]
+    );
+
+    const refsResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS count
+      FROM users
+      WHERE referred_by = $1
+      `,
+      [req.user.id]
+    );
+
+    const checkinResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS count
+      FROM checkins
+      WHERE user_id = $1
+        AND checkin_date = CURRENT_DATE
+      `,
+      [req.user.id]
+    );
+
+    res.json({
+      user: publicUser(userResult.rows[0]),
+      done: doneResult.rows[0].count,
+      refs: refsResult.rows[0].count,
+      checked_in_today:
+        checkinResult.rows[0].count > 0
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: "Không tải được dashboard."
+    });
   }
 });
 
-/* =========================================================
-   TASKS
-========================================================= */
+/*
+ * Danh sách nhiệm vụ
+ */
 
 app.get("/api/tasks", auth, async (req, res) => {
   try {
     const result = await pool.query(
       `
-        SELECT
-          t.id,
-          t.title,
-          t.description,
-          t.url,
-          t.points,
-          t.created_at,
-          CASE
-            WHEN c.id IS NULL THEN FALSE
-            ELSE TRUE
-          END AS completed
-        FROM nv_tasks t
-        LEFT JOIN nv_task_completions c
-          ON c.task_id = t.id
-         AND c.user_id = $1
-        WHERE t.active = TRUE
-        ORDER BY RANDOM()
-        LIMIT 20
+      SELECT
+        t.id,
+        t.title,
+        t.description,
+        t.task_url,
+        t.points,
+        t.is_main,
+        EXISTS (
+          SELECT 1
+          FROM task_completions c
+          WHERE c.user_id = $1
+            AND c.task_id = t.id
+        ) AS completed
+      FROM tasks t
+      WHERE t.active = TRUE
+      ORDER BY
+        t.is_main DESC,
+        t.id ASC
       `,
       [req.user.id]
     );
 
-    return ok(res, {
+    res.json({
       tasks: result.rows
     });
-  } catch (error) {
-    console.error("TASK LIST ERROR:", error);
 
-    return fail(res, 500, "Không tải được nhiệm vụ.");
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: "Không tải được nhiệm vụ."
+    });
   }
 });
+
+/*
+ * Hoàn thành nhiệm vụ
+ */
 
 app.post("/api/tasks/:id/complete", auth, async (req, res) => {
-  const taskId = Number(req.params.id);
-
-  if (!Number.isInteger(taskId)) {
-    return fail(res, 400, "Nhiệm vụ không hợp lệ.");
-  }
-
-  const client = await pool.connect();
-
   try {
-    await client.query("BEGIN");
+    const taskId = Number(req.params.id);
 
-    const taskResult = await client.query(
-      `
-        SELECT id, points, active
-        FROM nv_tasks
-        WHERE id = $1
-        FOR UPDATE
-      `,
-      [taskId]
-    );
-
-    if (taskResult.rows.length === 0) {
-      await client.query("ROLLBACK");
-      return fail(res, 404, "Không tìm thấy nhiệm vụ.");
+    if (!Number.isInteger(taskId)) {
+      return res.status(400).json({
+        error: "Nhiệm vụ không hợp lệ."
+      });
     }
 
-    const task = taskResult.rows[0];
+    const pointsAdded = await transaction(
+      async (client) => {
 
-    if (!task.active) {
-      await client.query("ROLLBACK");
-      return fail(res, 400, "Nhiệm vụ đã tạm dừng.");
-    }
+        const taskResult = await client.query(
+          `
+          SELECT *
+          FROM tasks
+          WHERE id = $1
+            AND active = TRUE
+          FOR UPDATE
+          `,
+          [taskId]
+        );
 
-    const existing = await client.query(
-      `
-        SELECT id
-        FROM nv_task_completions
-        WHERE user_id = $1
-          AND task_id = $2
-        LIMIT 1
-      `,
-      [req.user.id, taskId]
+        if (!taskResult.rowCount) {
+          throw new Error(
+            "Nhiệm vụ không tồn tại."
+          );
+        }
+
+        const task = taskResult.rows[0];
+
+        const completed = await client.query(
+          `
+          SELECT id
+          FROM task_completions
+          WHERE user_id = $1
+            AND task_id = $2
+          `,
+          [
+            req.user.id,
+            taskId
+          ]
+        );
+
+        if (completed.rowCount) {
+          throw new Error(
+            "Bạn đã hoàn thành nhiệm vụ này."
+          );
+        }
+
+        await client.query(
+          `
+          INSERT INTO task_completions
+          (user_id, task_id)
+          VALUES
+          ($1, $2)
+          `,
+          [
+            req.user.id,
+            taskId
+          ]
+        );
+
+        await addPoints(
+          client,
+          req.user.id,
+          task.points,
+          `Hoàn thành: ${task.title}`
+        );
+
+        return task.points;
+      }
     );
 
-    if (existing.rows.length > 0) {
-      await client.query("ROLLBACK");
+    res.json({
+      success: true,
+      points_added: pointsAdded
+    });
 
-      return fail(
-        res,
-        400,
-        "Bạn đã hoàn thành nhiệm vụ này."
+  } catch (error) {
+    console.error(error);
+
+    res.status(400).json({
+      error:
+        error.message ||
+        "Không thể hoàn thành nhiệm vụ."
+    });
+  }
+});
+
+/*
+ * Điểm danh
+ */
+
+app.post("/api/checkin", auth, async (req, res) => {
+  try {
+    await transaction(async (client) => {
+
+      const result = await client.query(
+        `
+        INSERT INTO checkins
+        (user_id, checkin_date)
+        VALUES
+        ($1, CURRENT_DATE)
+        ON CONFLICT
+        (user_id, checkin_date)
+        DO NOTHING
+        RETURNING id
+        `,
+        [req.user.id]
       );
+
+      if (!result.rowCount) {
+        throw new Error(
+          "Hôm nay bạn đã điểm danh rồi."
+        );
+      }
+
+      await addPoints(
+        client,
+        req.user.id,
+        10,
+        "Điểm danh hằng ngày"
+      );
+    });
+
+    res.json({
+      success: true,
+      points_added: 10
+    });
+
+  } catch (error) {
+    res.status(400).json({
+      error:
+        error.message ||
+        "Không thể điểm danh."
+    });
+  }
+});
+
+/*
+ * Gói đổi điểm
+ */
+
+app.get("/api/packages", auth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        id,
+        name,
+        points,
+        description
+      FROM packages
+      WHERE active = TRUE
+      ORDER BY points ASC
+      `
+    );
+
+    res.json({
+      packages: result.rows
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      error: "Không tải được gói."
+    });
+  }
+});
+
+/*
+ * Tạo yêu cầu quảng bá
+ */
+
+app.post("/api/promotions", auth, async (req, res) => {
+  try {
+    const packageId = Number(
+      req.body.package_id
+    );
+
+    const tiktokUrl = String(
+      req.body.tiktok_url || ""
+    ).trim();
+
+    if (!validTikTokUrl(tiktokUrl)) {
+      return res.status(400).json({
+        error:
+          "Link TikTok không hợp lệ."
+      });
     }
 
-    await client.query(
-      `
-        INSERT INTO nv_task_completions
-        (user_id, task_id, points_awarded)
-        VALUES ($1, $2, $3)
-      `,
-      [req.user.id, taskId, task.points]
+    const promotion = await transaction(
+      async (client) => {
+
+        const packageResult = await client.query(
+          `
+          SELECT *
+          FROM packages
+          WHERE id = $1
+            AND active = TRUE
+          `,
+          [packageId]
+        );
+
+        if (!packageResult.rowCount) {
+          throw new Error(
+            "Gói không tồn tại."
+          );
+        }
+
+        const pkg = packageResult.rows[0];
+
+        await removePoints(
+          client,
+          req.user.id,
+          pkg.points,
+          `Đổi điểm: ${pkg.name}`
+        );
+
+        const result = await client.query(
+          `
+          INSERT INTO promotions
+          (
+            user_id,
+            package_name,
+            points,
+            tiktok_url
+          )
+          VALUES
+          ($1, $2, $3, $4)
+          RETURNING *
+          `,
+          [
+            req.user.id,
+            pkg.name,
+            pkg.points,
+            tiktokUrl
+          ]
+        );
+
+        return result.rows[0];
+      }
     );
 
-    await client.query(
-      `
-        UPDATE nv_users
-        SET
-          points = points + $2,
-          total_completed = total_completed + 1
-        WHERE id = $1
-      `,
-      [req.user.id, task.points]
-    );
-
-    await client.query("COMMIT");
-
-    return ok(res, {
-      message: `Hoàn thành nhiệm vụ +${task.points} điểm.`,
-      pointsAdded: task.points
+    res.json({
+      success: true,
+      promotion
     });
+
   } catch (error) {
-    await client.query("ROLLBACK");
-
-    console.error("TASK COMPLETE ERROR:", error);
-
-    return fail(res, 500, "Không thể hoàn thành nhiệm vụ.");
-  } finally {
-    client.release();
+    res.status(400).json({
+      error:
+        error.message ||
+        "Không thể tạo yêu cầu."
+    });
   }
 });
 
-/* =========================================================
-   LEADERBOARD
-========================================================= */
-
-app.get("/api/leaderboard/day", async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT
-        u.id,
-        u.username,
-        u.points,
-        COALESCE(
-          (
-            SELECT SUM(c.points_awarded)
-            FROM nv_task_completions c
-            WHERE c.user_id = u.id
-              AND c.completed_at >= CURRENT_DATE
-          ),
-          0
-        )
-        +
-        COALESCE(
-          (
-            SELECT SUM(ci.points_awarded)
-            FROM nv_checkins ci
-            WHERE ci.user_id = u.id
-              AND ci.checkin_date = CURRENT_DATE
-          ),
-          0
-        ) AS today_points
-      FROM nv_users u
-      ORDER BY today_points DESC, u.id ASC
-      LIMIT 50
-    `);
-
-    return ok(res, {
-      reward: {
-        1: 50,
-        2: 30,
-        3: 20
-      },
-      leaderboard: result.rows
-    });
-  } catch (error) {
-    console.error("DAY LEADERBOARD ERROR:", error);
-
-    return fail(res, 500, "Không tải được bảng xếp hạng.");
-  }
-});
-
-app.get("/api/leaderboard/week", async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT
-        u.id,
-        u.username,
-        u.points,
-        COALESCE(
-          (
-            SELECT SUM(c.points_awarded)
-            FROM nv_task_completions c
-            WHERE c.user_id = u.id
-              AND c.completed_at >= date_trunc('week', CURRENT_DATE)
-          ),
-          0
-        )
-        +
-        COALESCE(
-          (
-            SELECT SUM(ci.points_awarded)
-            FROM nv_checkins ci
-            WHERE ci.user_id = u.id
-              AND ci.checkin_date >= date_trunc('week', CURRENT_DATE)::date
-          ),
-          0
-        ) AS week_points
-      FROM nv_users u
-      ORDER BY week_points DESC, u.id ASC
-      LIMIT 50
-    `);
-
-    return ok(res, {
-      reward: {
-        1: 150,
-        2: 100,
-        3: 50
-      },
-      leaderboard: result.rows
-    });
-  } catch (error) {
-    console.error("WEEK LEADERBOARD ERROR:", error);
-
-    return fail(res, 500, "Không tải được bảng xếp hạng.");
-  }
-});
-
-/* =========================================================
-   REFERRAL
-========================================================= */
+/*
+ * Referral
+ */
 
 app.get("/api/referral", auth, async (req, res) => {
   try {
     const result = await pool.query(
       `
-        SELECT
-          referral_code,
-          COUNT(*) FILTER (
-            WHERE referred_by = $1
-          )::int AS invited_users
-        FROM nv_users
-        WHERE id = $1
-        GROUP BY referral_code
+      SELECT referral_code
+      FROM users
+      WHERE id = $1
       `,
       [req.user.id]
     );
 
-    return ok(res, {
-      referralCode: result.rows[0]?.referral_code || "",
-      invitedUsers: result.rows[0]?.invited_users || 0,
-      rewardForInviter: 20,
-      rewardForNewUser: 10
-    });
-  } catch (error) {
-    console.error("REFERRAL ERROR:", error);
+    const baseUrl =
+      `${req.protocol}://${req.get("host")}`;
 
-    return fail(res, 500, "Không tải được thông tin giới thiệu.");
+    const code =
+      result.rows[0].referral_code;
+
+    res.json({
+      referral_code: code,
+      referral_link:
+        `${baseUrl}/?ref=${code}`
+    });
+
+  } catch {
+    res.status(500).json({
+      error: "Không tải được mã giới thiệu."
+    });
   }
 });
 
-/* =========================================================
-   REWARDS
-========================================================= */
+/*
+ * Lịch sử điểm
+ */
 
-app.get("/api/rewards", auth, async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT
-        id,
-        title,
-        description,
-        cost
-      FROM nv_rewards
-      WHERE active = TRUE
-      ORDER BY cost ASC
-    `);
-
-    return ok(res, {
-      rewards: result.rows
-    });
-  } catch (error) {
-    console.error("REWARDS ERROR:", error);
-
-    return fail(res, 500, "Không tải được phần đổi điểm.");
-  }
-});
-
-app.post("/api/rewards/:id/redeem", auth, async (req, res) => {
-  const rewardId = Number(req.params.id);
-
-  if (!Number.isInteger(rewardId)) {
-    return fail(res, 400, "Gói đổi điểm không hợp lệ.");
-  }
-
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
-    const rewardResult = await client.query(
-      `
-        SELECT id, title, cost
-        FROM nv_rewards
-        WHERE id = $1
-          AND active = TRUE
-        FOR UPDATE
-      `,
-      [rewardId]
-    );
-
-    if (rewardResult.rows.length === 0) {
-      await client.query("ROLLBACK");
-
-      return fail(res, 404, "Không tìm thấy phần thưởng.");
-    }
-
-    const reward = rewardResult.rows[0];
-
-    const userResult = await client.query(
-      `
-        SELECT points
-        FROM nv_users
-        WHERE id = $1
-        FOR UPDATE
-      `,
-      [req.user.id]
-    );
-
-    const currentPoints = userResult.rows[0].points;
-
-    if (currentPoints < reward.cost) {
-      await client.query("ROLLBACK");
-
-      return fail(
-        res,
-        400,
-        "Bạn không đủ điểm để đổi."
-      );
-    }
-
-    await client.query(
-      `
-        UPDATE nv_users
-        SET points = points - $2
-        WHERE id = $1
-      `,
-      [req.user.id, reward.cost]
-    );
-
-    const redemption = await client.query(
-      `
-        INSERT INTO nv_redemptions
-        (
-          user_id,
-          reward_id,
-          reward_title,
-          cost,
-          status
-        )
-        VALUES
-        ($1, $2, $3, $4, 'pending')
-        RETURNING id, status, created_at
-      `,
-      [
-        req.user.id,
-        reward.id,
-        reward.title,
-        reward.cost
-      ]
-    );
-
-    await client.query("COMMIT");
-
-    return ok(res, {
-      message: "Đã tạo yêu cầu đổi điểm.",
-      redemption: redemption.rows[0],
-      remainingPoints: currentPoints - reward.cost
-    });
-  } catch (error) {
-    await client.query("ROLLBACK");
-
-    console.error("REDEEM ERROR:", error);
-
-    return fail(res, 500, "Đổi điểm thất bại.");
-  } finally {
-    client.release();
-  }
-});
-
-/* =========================================================
-   USER REDEMPTIONS
-========================================================= */
-
-app.get("/api/redemptions", auth, async (req, res) => {
+app.get("/api/history", auth, async (req, res) => {
   try {
     const result = await pool.query(
       `
-        SELECT
-          id,
-          reward_title,
-          cost,
-          status,
-          created_at,
-          processed_at
-        FROM nv_redemptions
-        WHERE user_id = $1
-        ORDER BY id DESC
-        LIMIT 50
+      SELECT
+        id,
+        amount,
+        reason,
+        created_at
+      FROM point_transactions
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 100
       `,
       [req.user.id]
     );
 
-    return ok(res, {
-      redemptions: result.rows
+    res.json({
+      history: result.rows
     });
-  } catch (error) {
-    console.error("USER REDEMPTIONS ERROR:", error);
 
-    return fail(res, 500, "Không tải được lịch sử đổi điểm.");
+  } catch {
+    res.status(500).json({
+      error: "Không tải được lịch sử."
+    });
   }
 });
 
-/* =========================================================
-   ADMIN - USERS
-========================================================= */
+/*
+ * Bảng xếp hạng
+ */
+
+app.get("/api/leaderboard", auth, async (req, res) => {
+  try {
+    const daily = await pool.query(`
+      SELECT
+        u.id,
+        u.email,
+        COALESCE(
+          SUM(
+            CASE
+              WHEN pt.amount > 0
+              THEN pt.amount
+              ELSE 0
+            END
+          ),
+          0
+        )::int AS score
+      FROM users u
+      LEFT JOIN point_transactions pt
+        ON pt.user_id = u.id
+        AND pt.created_at >= CURRENT_DATE
+        AND pt.created_at <
+            CURRENT_DATE + INTERVAL '1 day'
+      WHERE
+        u.is_admin = FALSE
+        AND u.is_blocked = FALSE
+      GROUP BY u.id
+      ORDER BY score DESC, u.id ASC
+      LIMIT 10
+    `);
+
+    const weekly = await pool.query(`
+      SELECT
+        u.id,
+        u.email,
+        COALESCE(
+          SUM(
+            CASE
+              WHEN pt.amount > 0
+              THEN pt.amount
+              ELSE 0
+            END
+          ),
+          0
+        )::int AS score
+      FROM users u
+      LEFT JOIN point_transactions pt
+        ON pt.user_id = u.id
+        AND pt.created_at >= date_trunc(
+          'week',
+          CURRENT_DATE
+        )
+        AND pt.created_at <
+          date_trunc(
+            'week',
+            CURRENT_DATE
+          ) + INTERVAL '7 days'
+      WHERE
+        u.is_admin = FALSE
+        AND u.is_blocked = FALSE
+      GROUP BY u.id
+      ORDER BY score DESC, u.id ASC
+      LIMIT 10
+    `);
+
+    res.json({
+      daily: daily.rows,
+      weekly: weekly.rows,
+      rewards: {
+        daily: [50, 30, 20],
+        weekly: [150, 100, 50]
+      }
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: "Không tải được bảng xếp hạng."
+    });
+  }
+});
+
+/*
+ * ADMIN - thống kê
+ */
+
+app.get(
+  "/api/admin/stats",
+  auth,
+  adminOnly,
+  async (req, res) => {
+
+    const users = await pool.query(`
+      SELECT COUNT(*)::int AS count
+      FROM users
+    `);
+
+    const credits = await pool.query(`
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN amount > 0
+              THEN amount
+              ELSE 0
+            END
+          ),
+          0
+        )::int AS total
+      FROM point_transactions
+    `);
+
+    const promotions = await pool.query(`
+      SELECT COUNT(*)::int AS count
+      FROM promotions
+    `);
+
+    res.json({
+      users: users.rows[0].count,
+      credits: credits.rows[0].total,
+      promotions: promotions.rows[0].count
+    });
+  }
+);
+
+/*
+ * ADMIN - người dùng
+ */
 
 app.get(
   "/api/admin/users",
   auth,
   adminOnly,
   async (req, res) => {
-    try {
-      const result = await pool.query(`
-        SELECT
-          id,
-          email,
-          username,
-          role,
-          points,
-          total_completed,
-          total_checkins,
-          streak,
-          referral_code,
-          created_at
-        FROM nv_users
-        ORDER BY id DESC
-        LIMIT 200
-      `);
 
-      return ok(res, {
-        users: result.rows
-      });
-    } catch (error) {
-      console.error("ADMIN USERS ERROR:", error);
+    const result = await pool.query(`
+      SELECT
+        id,
+        email,
+        points,
+        referral_code,
+        is_admin,
+        is_blocked,
+        created_at
+      FROM users
+      ORDER BY id DESC
+      LIMIT 200
+    `);
 
-      return fail(res, 500, "Không tải được người dùng.");
-    }
+    res.json({
+      users: result.rows
+    });
   }
 );
 
-/* =========================================================
-   ADMIN - TASKS
-========================================================= */
+/*
+ * ADMIN - khóa / mở khóa
+ */
 
-app.get(
-  "/api/admin/tasks",
+app.post(
+  "/api/admin/users/:id/block",
   auth,
   adminOnly,
   async (req, res) => {
-    try {
-      const result = await pool.query(`
-        SELECT *
-        FROM nv_tasks
-        ORDER BY id DESC
-      `);
 
-      return ok(res, {
-        tasks: result.rows
+    const id = Number(req.params.id);
+    const blocked = Boolean(req.body.blocked);
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({
+        error: "ID không hợp lệ."
       });
-    } catch (error) {
-      console.error("ADMIN TASKS ERROR:", error);
-
-      return fail(res, 500, "Không tải được nhiệm vụ.");
     }
+
+    await pool.query(
+      `
+      UPDATE users
+      SET is_blocked = $1
+      WHERE id = $2
+        AND is_admin = FALSE
+      `,
+      [
+        blocked,
+        id
+      ]
+    );
+
+    res.json({
+      success: true
+    });
   }
 );
+
+/*
+ * ADMIN - tạo nhiệm vụ
+ */
 
 app.post(
   "/api/admin/tasks",
   auth,
   adminOnly,
   async (req, res) => {
+
     try {
-      const title = String(req.body.title || "").trim();
+      const title = String(
+        req.body.title || ""
+      ).trim();
+
       const description = String(
         req.body.description || ""
       ).trim();
-      const url = String(req.body.url || "").trim();
-      const points = Number(req.body.points);
+
+      const taskUrl = String(
+        req.body.task_url || ""
+      ).trim();
+
+      const points = Number(
+        req.body.points || 10
+      );
+
+      const isMain =
+        Boolean(req.body.is_main);
 
       if (!title) {
-        return fail(res, 400, "Thiếu tên nhiệm vụ.");
+        return res.status(400).json({
+          error: "Tên nhiệm vụ không được trống."
+        });
       }
 
-      if (!url || !/^https?:\/\//i.test(url)) {
-        return fail(res, 400, "URL không hợp lệ.");
+      if (
+        !Number.isInteger(points) ||
+        points < 1 ||
+        points > 1000
+      ) {
+        return res.status(400).json({
+          error: "Điểm nhiệm vụ không hợp lệ."
+        });
       }
 
-      if (!Number.isInteger(points) || points < 1 || points > 1000) {
-        return fail(res, 400, "Điểm nhiệm vụ không hợp lệ.");
+      if (
+        taskUrl &&
+        !validTikTokUrl(taskUrl)
+      ) {
+        return res.status(400).json({
+          error: "Link TikTok không hợp lệ."
+        });
       }
 
       const result = await pool.query(
         `
-          INSERT INTO nv_tasks
-          (title, description, url, points)
-          VALUES ($1, $2, $3, $4)
-          RETURNING *
+        INSERT INTO tasks
+        (
+          title,
+          description,
+          task_url,
+          points,
+          is_main,
+          active
+        )
+        VALUES
+        ($1, $2, $3, $4, $5, TRUE)
+        RETURNING *
         `,
         [
           title,
           description,
-          url,
-          points
+          taskUrl,
+          points,
+          isMain
         ]
       );
 
-      return ok(res, {
-        message: "Đã tạo nhiệm vụ.",
+      res.json({
+        success: true,
         task: result.rows[0]
       });
-    } catch (error) {
-      console.error("ADMIN CREATE TASK ERROR:", error);
 
-      return fail(res, 500, "Không tạo được nhiệm vụ.");
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error: "Không thể tạo nhiệm vụ."
+      });
     }
   }
 );
 
-app.patch(
-  "/api/admin/tasks/:id",
-  auth,
-  adminOnly,
-  async (req, res) => {
-    try {
-      const taskId = Number(req.params.id);
-
-      if (!Number.isInteger(taskId)) {
-        return fail(res, 400, "ID nhiệm vụ không hợp lệ.");
-      }
-
-      const active =
-        req.body.active === true ||
-        req.body.active === "true";
-
-      const result = await pool.query(
-        `
-          UPDATE nv_tasks
-          SET active = $2
-          WHERE id = $1
-          RETURNING *
-        `,
-        [taskId, active]
-      );
-
-      if (result.rows.length === 0) {
-        return fail(res, 404, "Không tìm thấy nhiệm vụ.");
-      }
-
-      return ok(res, {
-        message: "Đã cập nhật nhiệm vụ.",
-        task: result.rows[0]
-      });
-    } catch (error) {
-      console.error("ADMIN UPDATE TASK ERROR:", error);
-
-      return fail(res, 500, "Không cập nhật được nhiệm vụ.");
-    }
-  }
-);
-
-/* =========================================================
-   ADMIN - REDEMPTIONS
-========================================================= */
+/*
+ * ADMIN - danh sách quảng bá
+ */
 
 app.get(
-  "/api/admin/redemptions",
+  "/api/admin/promotions",
   auth,
   adminOnly,
   async (req, res) => {
-    try {
-      const result = await pool.query(`
-        SELECT
-          r.id,
-          r.user_id,
-          u.username,
-          u.email,
-          r.reward_title,
-          r.cost,
-          r.status,
-          r.created_at,
-          r.processed_at
-        FROM nv_redemptions r
-        JOIN nv_users u
-          ON u.id = r.user_id
-        ORDER BY r.id DESC
-        LIMIT 200
-      `);
 
-      return ok(res, {
-        redemptions: result.rows
-      });
-    } catch (error) {
-      console.error("ADMIN REDEMPTIONS ERROR:", error);
+    const result = await pool.query(`
+      SELECT
+        p.id,
+        p.package_name,
+        p.points,
+        p.tiktok_url,
+        p.status,
+        p.created_at,
+        u.email
+      FROM promotions p
+      JOIN users u
+        ON u.id = p.user_id
+      ORDER BY p.created_at DESC
+      LIMIT 200
+    `);
 
-      return fail(res, 500, "Không tải được yêu cầu đổi điểm.");
-    }
+    res.json({
+      promotions: result.rows
+    });
   }
 );
 
-app.patch(
-  "/api/admin/redemptions/:id",
+/*
+ * ADMIN - đổi trạng thái quảng bá
+ */
+
+app.post(
+  "/api/admin/promotions/:id/status",
   auth,
   adminOnly,
   async (req, res) => {
-    const redemptionId = Number(req.params.id);
-    const status = String(req.body.status || "")
-      .trim()
-      .toLowerCase();
+
+    const id = Number(req.params.id);
+    const status = String(
+      req.body.status || ""
+    ).trim();
 
     const allowed = [
       "pending",
-      "approved",
-      "done",
-      "rejected"
+      "processing",
+      "completed",
+      "cancelled"
     ];
 
-    if (!Number.isInteger(redemptionId)) {
-      return fail(res, 400, "ID yêu cầu không hợp lệ.");
-    }
-
     if (!allowed.includes(status)) {
-      return fail(res, 400, "Trạng thái không hợp lệ.");
-    }
-
-    const client = await pool.connect();
-
-    try {
-      await client.query("BEGIN");
-
-      const result = await client.query(
-        `
-          SELECT *
-          FROM nv_redemptions
-          WHERE id = $1
-          FOR UPDATE
-        `,
-        [redemptionId]
-      );
-
-      if (result.rows.length === 0) {
-        await client.query("ROLLBACK");
-
-        return fail(res, 404, "Không tìm thấy yêu cầu.");
-      }
-
-      const redemption = result.rows[0];
-
-      if (
-        redemption.status === "rejected" ||
-        redemption.status === "done"
-      ) {
-        await client.query("ROLLBACK");
-
-        return fail(
-          res,
-          400,
-          "Yêu cầu này đã được xử lý."
-        );
-      }
-
-      if (status === "rejected") {
-        await client.query(
-          `
-            UPDATE nv_users
-            SET points = points + $2
-            WHERE id = $1
-          `,
-          [
-            redemption.user_id,
-            redemption.cost
-          ]
-        );
-      }
-
-      await client.query(
-        `
-          UPDATE nv_redemptions
-          SET
-            status = $2,
-            processed_at =
-              CASE
-                WHEN $2 IN ('approved', 'done', 'rejected')
-                THEN NOW()
-                ELSE processed_at
-              END
-          WHERE id = $1
-        `,
-        [
-          redemptionId,
-          status
-        ]
-      );
-
-      await client.query("COMMIT");
-
-      return ok(res, {
-        message: "Đã cập nhật yêu cầu."
+      return res.status(400).json({
+        error: "Trạng thái không hợp lệ."
       });
-    } catch (error) {
-      await client.query("ROLLBACK");
-
-      console.error(
-        "ADMIN UPDATE REDEMPTION ERROR:",
-        error
-      );
-
-      return fail(
-        res,
-        500,
-        "Không cập nhật được yêu cầu."
-      );
-    } finally {
-      client.release();
     }
+
+    const result = await pool.query(
+      `
+      UPDATE promotions
+      SET status = $1
+      WHERE id = $2
+      RETURNING id
+      `,
+      [
+        status,
+        id
+      ]
+    );
+
+    if (!result.rowCount) {
+      return res.status(404).json({
+        error: "Không tìm thấy yêu cầu."
+      });
+    }
+
+    res.json({
+      success: true
+    });
   }
 );
 
-/* =========================================================
-   CLEAN OLD SESSIONS
-========================================================= */
+/*
+ * Lỗi chung
+ */
 
-async function cleanSessions() {
-  try {
-    await pool.query(`
-      DELETE FROM nv_sessions
-      WHERE expires_at <= NOW()
-    `);
-  } catch (error) {
-    console.error("SESSION CLEAN ERROR:", error);
-  }
-}
+app.use((err, req, res, next) => {
+  console.error(err);
 
-/* =========================================================
-   FRONTEND
-========================================================= */
-
-app.get("/", (req, res) => {
-  res.sendFile(INDEX_FILE);
+  res.status(500).json({
+    error: "Lỗi máy chủ."
+  });
 });
 
 /*
-  Regex route được dùng thay cho app.get("*")
-  để tránh khác biệt giữa các phiên bản router.
-*/
-app.get(/.*/, (req, res, next) => {
-  if (req.path.startsWith("/api/")) {
-    return next();
-  }
+ * Khởi động server SAU KHI database sẵn sàng.
+ */
 
-  res.sendFile(INDEX_FILE, (error) => {
-    if (error) {
-      next(error);
-    }
-  });
-});
+initDatabase()
+  .then(() => {
 
-/* =========================================================
-   404
-========================================================= */
-
-app.use((req, res) => {
-  if (req.path.startsWith("/api/")) {
-    return res.status(404).json({
-      success: false,
-      message: "API không tồn tại."
+    app.listen(PORT, () => {
+      console.log(
+        `nhiemvutiktokfree running on port ${PORT}`
+      );
     });
-  }
 
-  return res.status(404).send("404 - Page not found");
-});
+  })
+  .catch((error) => {
 
-/* =========================================================
-   ERROR HANDLER
-========================================================= */
-
-app.use((error, req, res, next) => {
-  console.error("SERVER ERROR:", error);
-
-  if (res.headersSent) {
-    return next(error);
-  }
-
-  return res.status(500).json({
-    success: false,
-    message: "Lỗi máy chủ.",
-    error:
-      process.env.NODE_ENV === "production"
-        ? undefined
-        : error.message
-  });
-});
-
-/* =========================================================
-   START
-========================================================= */
-
-async function startServer() {
-  try {
-    await initDatabase();
-
-    await cleanSessions();
-
-    setInterval(
-      cleanSessions,
-      60 * 60 * 1000
+    console.error(
+      "STARTUP ERROR:",
+      error
     );
 
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(
-        `NhiemVuTikTokFree running on port ${PORT}`
-      );
-      console.log(
-        `Public directory: ${PUBLIC_DIR}`
-      );
-      console.log(
-        `Index file: ${INDEX_FILE}`
-      );
-    });
-  } catch (error) {
-    console.error("STARTUP ERROR:", error);
     process.exit(1);
-  }
-}
+  });
 
 process.on("SIGTERM", async () => {
-  console.log("SIGTERM received.");
   await pool.end();
   process.exit(0);
 });
-
-process.on("SIGINT", async () => {
-  console.log("SIGINT received.");
-  await pool.end();
-  process.exit(0);
-});
-
-startServer();
